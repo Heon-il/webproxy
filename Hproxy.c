@@ -44,6 +44,25 @@ void cache_uri(char *uri,char *buf);
 void readerPre(int i);
 void readerAfter(int i);
 
+/* sbuf start */
+/* For using producer and consumer problem access, define sbuf_t struct */
+typedef struct{
+    int *buf; // buffer array pointer
+    int n; // Max num of slots
+    int front; // buf[(front+1) % n] is first item
+    int rear; // buf[rear % n] is last item
+    sem_t mutex; // Protects accesses to buf
+    sem_t slots; // Counts available slots
+    sem_t items; // Counts available items
+}sbuf_t;
+
+/* sbuf function */
+void sbuf_init(sbuf_t *sp, int n);
+void sbuf_deinit(sbuf_t *sp);
+void sbuf_insert(sbuf_t *sp, int item);
+int sbuf_remove(sbuf_t *sp);
+/* sbuf end */
+
 
 /* For cache, we build cache struct */
 typedef struct{
@@ -67,6 +86,7 @@ typedef struct {
     cache_block cacheobjs[CACHE_OBJS_COUNT];  /*ten cache blocks*/
     int cache_num;
 }Cache;
+
 
 Cache cache;
 sbuf_t sbuf; // Shared buffer of connected descriptors
@@ -400,4 +420,42 @@ void cache_LRU(int index){
         }
         writeAfter(i);
     }
+}
+
+
+/* Create an empty, bounded, shared FIFO buffer with n slots */
+void sbuf_init(sbuf_t *sp, int n){
+  sp->buf = Calloc(n, sizeof(int)); // alloc buffer
+  sp->n = n; // buffer size
+  sp->front = sp->rear = 0; // 
+  Sem_init(&sp->mutex, 0, 1); // Binary Semaphore (mutex)
+  Sem_init(&sp->slots, 0, n); // Initially, buf has n empty slots
+  Sem_intt(&sp->items, 0, 0); // Initially, buf has zero items;
+}
+
+/* Clean up buffer sp */
+void sbuf_deinit(sbuf_t *sp){
+  Free(sp->buf);
+}
+
+/* Insert item onto the rear of shared buffer sp*/
+void sbuf_insert(sbuf_t *sp, int item)
+{
+  P(&sp->slots); // Wait for available slot
+  P(&sp->mutex); // Lock the buffer
+  sp->buf[(++sp->rear)%(sp->n)] = item; // Insert item
+  V(&sp->mutex);
+  V(&sp->items);
+}
+
+/* Remove and return the first item from buffer sp */
+int sbuf_remove(sbuf_t *sp)
+{
+  int item; 
+  P(&sp->items);
+  P(&sp->mutex);
+  item = sp->buf[(++sp->front)%(sp->n)];
+  V(&sp->mutex);
+  V(&sp->slots);
+  return item;
 }

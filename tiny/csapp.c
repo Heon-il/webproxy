@@ -779,14 +779,14 @@ ssize_t rio_writen(int fd, void *usrbuf, size_t n)
     char *bufp = usrbuf;
 
     while (nleft > 0) {
-	if ((nwritten = write(fd, bufp, nleft)) <= 0) {
-	    if (errno == EINTR)  /* Interrupted by sig handler return */
-		nwritten = 0;    /* and call write() again */
-	    else
-		return -1;       /* errno set by write() */
-	}
-	nleft -= nwritten;
-	bufp += nwritten;
+        if ((nwritten = write(fd, bufp, nleft)) <= 0) {
+            if (errno == EINTR) /* and call write() again */
+            nwritten = 0; /* Interrupted by sig handler return */
+            else
+            return -1;       /* errno set by write() */
+        }
+	    nleft -= nwritten;
+	    bufp += nwritten;
     }
     return n;
 }
@@ -1062,6 +1062,64 @@ int Open_listenfd(char *port)
     if ((rc = open_listenfd(port)) < 0)
 	unix_error("Open_listenfd error");
     return rc;
+}
+
+/* Create an empty, bounded, shared FIFO buffer with n slots */
+void sbuf_init(sbuf_t *sp, int n){
+  sp->buf = Calloc(n, sizeof(int)); // alloc buffer
+  sp->n = n; // buffer size
+  sp->front = sp->rear = 0; // 
+  Sem_init(&sp->mutex, 0, 1); // Binary Semaphore (mutex)
+  Sem_init(&sp->slots, 0, n); // Initially, buf has n empty slots
+  Sem_intt(&sp->items, 0, 0); // Initially, buf has zero items;
+}
+
+/* Clean up buffer sp */
+void sbuf_deinit(sbuf_t *sp){
+  Free(sp->buf);
+}
+
+/* Insert item onto the rear of shared buffer sp*/
+void sbuf_insert(sbuf_t *sp, int item)
+{
+  P(&sp->slots); // Wait for available slot
+  P(&sp->mutex); // Lock the buffer
+  sp->buf[(++sp->rear)%(sp->n)] = item; // Insert item
+  V(&sp->mutex);
+  V(&sp->items);
+}
+
+/* Remove and return the first item from buffer sp */
+int sbuf_remove(sbuf_t *sp)
+{
+  int item; 
+  P(&sp->items);
+  P(&sp->mutex);
+  item = sp->buf[(++sp->front)%(sp->n)];
+  V(&sp->mutex);
+  V(&sp->slots);
+  return item;
+}
+
+// check buffer is empty
+// if buffer is empty return 1 else 0
+int sbuf_empty(sbuf_t *sp)
+{
+    int e;
+    P(&sp->mutex); // Lock buffer
+    e = sp->front == sp->rear; // check buffer is empty
+    V(&sp->mutex); // Unlock buffer
+    return e;
+}
+
+// Check buffer is Full
+// if buffer is full return 1 else 0
+int sbuf_full(sbuf_t *sp){
+    int f;
+    P(&sp->mutex);
+    f = (sp->rear - sp->front) == sp->n;
+    V(&sp->mutex);
+    return f;
 }
 
 /* $end csapp.c */

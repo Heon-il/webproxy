@@ -1,29 +1,43 @@
-/* $begin tinymain */
-/*
- * tiny.c - A simple, iterative HTTP/1.0 Web server that uses the
- *     GET method to serve static and dynamic content.
- *
- * Updated 11/2019 droh
- *   - Fixed sprintf() aliasing issue in serve_static(), and clienterror().
- */
+// 1개의 adjust_thread가 thread를 관리함
 #include "csapp.h"
+#include "sbuf.h"
 
+#define SBUFSIZE 4
+#define INIT_THREAD_N 1
+#define THREAD_LIMIT 4096
+
+
+static int nthreads;
+static sbuf_t sbuf; // Shared buffer of connected descriptors
+static ithread threads[THREAD_LIMIT];
+
+
+// Network Function
 void doit(int fd);
 void read_requesthdrs(rio_t *rp);
 int parse_uri(char *uri, char *filename, char *cgiargs);
-// void serve_static(int fd, char *filename, int filesize);
 void serve_static(int fd, char *filename, int filesize, char *method);
 void get_filetype(char *filename, char *filetype);
-// void serve_dynamic(int fd, char *filename, char *cgiargs);
 void serve_dynamic(int fd, char *filename, char *cgiargs, char* method);
 void clienterror(int fd, char *cause, char *errnum, char *shortmsg,
                  char *longmsg);
 
+
+// Thread pool function
+void init_work_threads(void);
+void *serve_thread(void *vargp);
+void *adjust_threads(void *vargp);
+void create_threads(int start, int end);
+
+
 int main(int argc, char **argv) {
   int listenfd, connfd;
-  char hostname[MAXLINE], port[MAXLINE];
   socklen_t clientlen;
   struct sockaddr_storage clientaddr;
+  pthread_t tid; // for adjust thread obj;
+
+  char hostname[MAXLINE], port[MAXLINE]; // 음.. 이게 좀!!!
+  
 
   /* Check command line args */
   if (argc != 2) {
@@ -32,6 +46,10 @@ int main(int argc, char **argv) {
   }
 
   listenfd = Open_listenfd(argv[1]);
+
+  init_work_threads();
+  Pthread_create(&tid, NULL, adjust_threads, NULL); // Create thread that adjusting thread pool
+
   while (1) {
     clientlen = sizeof(clientaddr);
     connfd = Accept(listenfd, (SA *)&clientaddr,
@@ -39,38 +57,17 @@ int main(int argc, char **argv) {
     Getnameinfo((SA *)&clientaddr, clientlen, hostname, MAXLINE, port, MAXLINE,
                 0);
     printf("Accepted connection from (%s, %s)\n", hostname, port);
-    doit(connfd);   // line:netp:tiny:doit
-    Close(connfd);  // line:netp:tiny:close
+    sbuf_insert(&sbuf, connfd); // Insert connfd in buffer
   }
 }
+
 
 void doit(int fd)
 {
   int is_static;
-  struct stat sbuf;
+  struct stat st_buf;
   char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
-  /*
-  #include <sys/stat.h>
-  https://pubs.opengroup.org/onlinepubs/007908799/xsh/sysstat.h.html
-
-  The structure stat contains at least the following members:
-    dev_t     st_dev     ID of device containing file
-    ino_t     st_ino     file serial number
-    mode_t    st_mode    mode of file (see below)
-    nlink_t   st_nlink   number of links to the file
-    uid_t     st_uid     user ID of file
-    gid_t     st_gid     group ID of file
-    dev_t     st_rdev    device ID (if file is character or block special)
-    off_t     st_size    file size in bytes (if file is a regular file)
-    time_t    st_atime   time of last access
-    time_t    st_mtime   time of last data modification
-    time_t    st_ctime   time of last status change
-    blksize_t st_blksize a filesystem-specific preferred I/O block size for
-                        this object.  In some filesystem types, this may
-                        vary from file to file
-    blkcnt_t  st_blocks  number of blocks allocated for this object
-  */
-
+  
   char filename[MAXLINE], cgiargs[MAXLINE];
   rio_t rio;
 
@@ -92,24 +89,24 @@ void doit(int fd)
 
   // Parse URI from Get request
   is_static = parse_uri(uri, filename, cgiargs);
-  if(stat(filename, &sbuf) < 0){
+  if(stat(filename, &st_buf) < 0){
     // stat function descript : https://pubs.opengroup.org/onlinepubs/007908799/xsh/stat.html
-    // 파일의 정보를 검색하고 stat 구조체인 sbuf에 그 정보를 저장한다. https://12bme.tistory.com/215
+    // 파일의 정보를 검색하고 stat 구조체인 st_buf에 그 정보를 저장한다. https://12bme.tistory.com/215
     clienterror(fd, filename, "404", "Not found"
         , "Tiny couldn't find this file");
     return;
   }
 
   if(is_static){
-    if( !(S_ISREG(sbuf.st_mode)) || !(S_IRUSR & sbuf.st_mode) ){
+    if( !(S_ISREG(st_buf.st_mode)) || !(S_IRUSR & st_buf.st_mode) ){
       clienterror(fd, filename, "403", "Forbidden",
            "Tiny couldn't read the file");
       return;
     }
-    serve_static(fd, filename, sbuf.st_size, method);
+    serve_static(fd, filename, st_buf.st_size, method);
   }
   else{
-    if(!(S_ISREG(sbuf.st_mode)) || !(S_IXUSR & sbuf.st_mode)){
+    if(!(S_ISREG(st_buf.st_mode)) || !(S_IXUSR & st_buf.st_mode)){
       clienterror(fd, filename, "403", "Forbidden",
           "Tiny couldn't run the CGI program");
       return;
@@ -117,6 +114,8 @@ void doit(int fd)
     serve_dynamic(fd, filename, cgiargs, method);
   }
 }
+
+
 
 void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longmsg){
   char buf[MAXLINE], body[MAXBUF];
@@ -199,12 +198,10 @@ void serve_static(int fd, char *filename, int filesize, char *method){
 
   // Send response body to client
   srcfd = Open(filename, O_RDONLY, 0);
-  // srcp = Mmap(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0); // alloc
   srcp = (char*)Malloc(filesize);
   Rio_readn(srcfd, srcp, filesize);
   Close(srcfd);
   Rio_writen(fd, srcp, filesize);
-  // Munmap(srcp, filesize); // Free
   free(srcp);
 }
 
@@ -220,6 +217,8 @@ void get_filetype(char *filename, char *filetype){
     strcpy(filetype, "image/jpeg");
   else if (strstr(filename, ".mpeg"))
     strcpy(filetype, "video/mpeg");
+  else if (strstr(filename, ".mp4"))
+    strcpy(filetype, "video/mp4");
   else
     strcpy(filetype, "text/plain");
 }
@@ -241,4 +240,82 @@ void serve_dynamic(int fd, char *filename, char *cgiargs, char* method){
     Execve(filename, emptylist, environ); //Run CGI Program
   }
   Wait(NULL); // Parent waits for and reaps child
+}
+
+
+void init_work_threads(void){
+  nthreads = INIT_THREAD_N; // 1
+  sbuf_init(&sbuf, SBUFSIZE);
+
+  // create initial server thread
+  create_threads(0, nthreads);
+}
+
+
+void *serve_thread(void *vargp){
+  int idx = *(int*)vargp;
+  Free(vargp);
+
+  while (1){
+    // get Lock first
+    // thread can't be kill now
+    P(&(threads[idx].mutex));
+    int connfd = sbuf_remove(&sbuf);
+    doit(connfd);
+    Close(connfd);
+
+    // service ends and release Lock
+    // so thread can be kill at this time
+    V(&(threads[idx].mutex));
+  } 
+}
+void *adjust_threads(void *vargp)
+{
+  sbuf_t *sp = &sbuf;
+  while(1){
+    if(sbuf_full(sp)){
+      if(nthreads == THREAD_LIMIT){
+        fprintf(stderr, "too many threads, can't be double\n");
+        continue;
+      }
+
+      // double n
+      int dn = 2*nthreads;
+      if (dn>THREAD_LIMIT)
+        dn = THREAD_LIMIT;
+      create_threads(nthreads, dn);
+      nthreads = dn; 
+      continue;
+    }
+
+    if(sbuf_empty(sp)){
+      if (nthreads==1) 
+        continue;
+      
+      int hn = nthreads /2;
+      int i;
+      for(i=hn; i<nthreads; i++){
+        P(&(threads[i].mutex));
+        Pthread_cancel(threads[i].tid);
+        V(&(threads[i].mutex));
+      }
+      nthreads = hn;
+      continue;
+    }
+  }
+}
+
+
+void create_threads(int start, int end)
+{
+  int i;
+  for(i=start; i<end; i++){
+    // init mutex for every new thread
+    Sem_init(&(threads[i].mutex), 0, 1);
+
+    // create thread
+    int *arg = (int*)Malloc(sizeof(int));
+    *arg = i;
+    Pthread_create(&(threads[i].tid), NULL, serve_thread, arg);
+  }
 }
