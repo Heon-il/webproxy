@@ -329,7 +329,7 @@ int cache_find(char *url)
         readerPre(i);
         if((cache.cacheobjs[i].isEmpty==0) && (strcmp(url, cache.cacheobjs[i].cache_url)==0))
             break;
-        readAfter(i);
+        readerAfter(i);
     }
     if(i>=CACHE_OBJS_COUNT)
         return -1; // cache miss
@@ -337,7 +337,6 @@ int cache_find(char *url)
 }
 
 // find the empty cacheObj or which cacheObj should be evictioned
-// 비거나 제거해야할 cache Obj 찾기
 int cache_eviction()
 {
     int min = LRU_MAGIC_NUMBER;
@@ -347,22 +346,21 @@ int cache_eviction()
         readerPre(i);
         if(cache.cacheobjs[i].isEmpty==1){
             minindex = i;
-            readAfter(i); // block 된 cache reader After를 해준다.
+            readerAfter(i); // block 된 cache readerAfter
             break;
         }
 
-        // 빈거 없을 때 가장 오래된거 return하려고
         if(cache.cacheobjs[i].LRU<min){
             minindex =i; 
-            readAfter(i);
+            readerAfter(i);
             continue;
         }
-        readAfter(i);
+        readerAfter(i);
     }
     return minindex;
 }
 
-// new caching 이니깐
+// new caching
 void cache_uri(char *uri, char *buf){
     int i = cache_eviction(); // 지워야 할 데이터를 찾음
 

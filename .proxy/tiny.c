@@ -20,10 +20,10 @@ void clienterror(int fd, char *cause, char *errnum, char *shortmsg,
 
 
 // Thread pool function
-void init_work_threads(void); // init sbuf and create one thread
-void *serve_thread(void *vargp); // serving thread
-void *adjust_threads(void *vargp); // adjust_thread adjust thread pool
-void create_threads(int start, int end); // thread create function
+void init_work_threads(void);
+void *serve_thread(void *vargp);
+void *adjust_threads(void *vargp);
+void create_threads(int start, int end);
 
 
 int main(int argc, char **argv) {
@@ -34,6 +34,7 @@ int main(int argc, char **argv) {
 
   char hostname[MAXLINE], port[MAXLINE]; // 음.. 이게 좀!!!
   
+
   /* Check command line args */
   if (argc != 2) {
     fprintf(stderr, "usage: %s <port>\n", argv[0]);
@@ -55,6 +56,7 @@ int main(int argc, char **argv) {
   }
 }
 
+
 void doit(int fd)
 {
   int is_static;
@@ -71,7 +73,7 @@ void doit(int fd)
   // printf("%s", buf);
   sscanf(buf, "%s %s %s", method, uri, version);
   
-  // get head 요청 이외 거부
+  // get head 요청 이외 전부 다른거 출력 
   if(!(strcasecmp(method, "GET")==0 || strcasecmp(method, "HEAD")==0) ){
     clienterror(fd, method, "501", "Not implemented", 
         "Tiny does not implement this method");
@@ -178,8 +180,8 @@ void serve_static(int fd, char *filename, int filesize, char *method){
   sprintf(buf, "%sContent-length: %d\r\n", buf, filesize);
   sprintf(buf, "%sContent-type:%s\r\n\r\n", buf, filetype);
   Rio_writen(fd, buf, strlen(buf));
-  printf("Response headers:\n");
-  printf("%s", buf);
+  // printf("Response headers:\n");
+  // printf("%s", buf);
 
   // if request was header, response has only header information
   if(strcasecmp(method, "HEAD")==0)

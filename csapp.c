@@ -1071,7 +1071,7 @@ void sbuf_init(sbuf_t *sp, int n){
   sp->front = sp->rear = 0; // 
   Sem_init(&sp->mutex, 0, 1); // Binary Semaphore (mutex)
   Sem_init(&sp->slots, 0, n); // Initially, buf has n empty slots
-  Sem_intt(&sp->items, 0, 0); // Initially, buf has zero items;
+  Sem_init(&sp->items, 0, 0); // Initially, buf has zero items;
 }
 
 /* Clean up buffer sp */
