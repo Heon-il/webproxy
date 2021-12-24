@@ -1,5 +1,5 @@
 // cache : reader and writer - reader first + queue
-// working thread - consumer and producer problem
+// prethreading : working thread - consumer and producer problem
 #include <stdio.h>
 #include "csapp.h"
 
