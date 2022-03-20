@@ -1,3 +1,33 @@
+점수
+
+70/70
+csapp.c / csapp.h에 추가한 것들 간단 설명
+prethreading과 thread pool을 구현하기 위해 에 SBUF 패키지와 ithread 구조체를 추가하였습니다.
+(SBUF는 Producer-Consumer Problem에 관련된 패키지 입니다.)
+
+# 구현 관련
+# tiny.c
+ - multithread programming
+ - thread pool 및 SBUF
+    - 버퍼가 full이 되면 thread수를 두 배로 늘리고, 버퍼가 비게 되면 쓰레드 수를 절반으로 줄입니다.
+    - tiny.c 서버의 특성상 유연함이 중요할 것으로 판단해 동적으로 쓰레드 수를 증가시키고 감소시키는 형태의 thread pool로 구현하는 것이 바람직하겠다고 생각했습니다.
+ - CGI
+    - 동적처리에 대해서는 멀티 프로세스(Fork - Exec)를 이용해 구현했습니다. Fork후 즉시 Exec 하는 경우는 multithread 환경에서 문제되지 않습니다.
+ - 공유자원, 경쟁상태(race condition), 교착상태(DeadLock)
+    - Rio 패키지 및 책에서 소개되는 기본 Network function들은 thread-safe합니다.
+    - thread pool을 구현할 때 뮤텍스 락 순서 규칙을 따르는 방식으로 DeadLock을 방지 합니다.
+
+# proxy.c
+ - multithread programming
+ - prethreading 및 SBUF
+    - 일정한 수의 thread를 미리 만들어 두고, buffer에 인풋이 들어오면 thread에서 consume하는 방식으로 구현했습니다.(Producer and Consumer Problem과 prethreading)
+    - proxy 서버는 일정한 양의 요청이 있을 것이라고 생각되어 thread수를 미리 정하는 prethreading 방식이 적절할 것이라고 예상했습니다.
+ - LRU Cache(공유자원)
+    - LRU 알고리즘의 Cache를 이용했습니다.
+    - mutex처럼 동작하면 read동작을 하는데 있어서 비효율적이기 때문에 reader-writer 문제 중 reader-first 해결책을 이용했습니다.
+    - reader - first에서 발생할 수 있는 기아문제를 부분적으로 보완하기 위해 queue를 추가했습니다.
+
+
 ####################################################################
 # CS:APP Proxy Lab
 #
